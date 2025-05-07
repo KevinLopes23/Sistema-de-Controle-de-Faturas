@@ -77,7 +77,7 @@ const theme = createTheme(
 );
 
 // Modo de demonstração para testes sem backend completo
-const DEMO_MODE = true;
+const DEMO_MODE = false;
 
 function App() {
   const [pendingNotificationsCount, setPendingNotificationsCount] = useState(0);

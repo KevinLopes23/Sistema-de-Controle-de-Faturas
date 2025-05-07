@@ -14,28 +14,19 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  async findAll() {
+  async findAll(): Promise<Notification[]> {
     return this.notificationsService.findAll();
   }
 
   @Get('pending')
-  async findPending() {
+  async findPending(): Promise<Notification[]> {
     return this.notificationsService.findPending();
   }
 
   @Post(':id/send')
-  async sendNotification(@Param('id', ParseIntPipe) id: number) {
-    // Buscar a notificação pelo ID
-    const notifications = await this.notificationsService.findAll();
-    const notification = notifications.find((n) => n.id === id);
-
-    if (!notification) {
-      throw new Error(`Notificação ${id} não encontrada`);
-    }
-
-    // Enviar a notificação
-    await this.notificationsService.sendNotification(notification);
-
-    return { success: true, message: 'Notificação enviada com sucesso' };
+  async sendNotification(
+    @Param('id') id: number,
+  ): Promise<{ success: boolean }> {
+    return this.notificationsService.sendNotification(id);
   }
 }

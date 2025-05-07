@@ -23,7 +23,7 @@ export class Notification {
   @Column()
   type: string; // VENCIMENTO, LIMITE_EXCEDIDO, etc
 
-  @Column({ type: 'date' })
+  @Column({ type: 'timestamp' })
   scheduleDate: Date;
 
   @Column({ default: false })
@@ -37,4 +37,10 @@ export class Notification {
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @Column({ default: false })
+  isProcessed: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  processedAt: Date;
 }

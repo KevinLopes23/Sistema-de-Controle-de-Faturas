@@ -6,6 +6,7 @@ import { OcrService } from '../ocr/ocr.service';
 import { ClassificationService } from '../classification/classification.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Notification } from '../entities/notification.entity';
 
 @Injectable()
 export class InvoicesService {
@@ -15,6 +16,8 @@ export class InvoicesService {
   constructor(
     @InjectRepository(Invoice)
     private invoicesRepository: Repository<Invoice>,
+    @InjectRepository(Notification)
+    private notificationsRepository: Repository<Notification>,
     private ocrService: OcrService,
     private classificationService: ClassificationService,
   ) {
@@ -46,27 +49,51 @@ export class InvoicesService {
       invoice = await this.invoicesRepository.save(invoice);
 
       // Extrair texto via OCR
+      this.logger.log(
+        `Iniciando extração de texto via OCR para a fatura ${invoice.id}`,
+      );
       const rawText = await this.ocrService.extractTextFromFile(filePath);
       invoice.rawText = rawText;
 
+      // Log do texto bruto extraído para debug
+      this.logger.log(
+        `Texto bruto extraído da fatura ${invoice.id}:\n${rawText.substring(0, 300)}...`,
+      );
+
       // Extrair dados estruturados
+      this.logger.log(`Extraindo dados estruturados da fatura ${invoice.id}`);
       const extractedData = this.ocrService.extractInvoiceData(rawText);
+
+      // Log dos dados extraídos
+      this.logger.log(`Dados extraídos da fatura ${invoice.id}:`);
+      this.logger.log(`- Valor: ${extractedData.amount || 'não detectado'}`);
+      this.logger.log(
+        `- Data de vencimento: ${extractedData.dueDate || 'não detectada'}`,
+      );
+      this.logger.log(
+        `- Data de emissão: ${extractedData.issueDate || 'não detectada'}`,
+      );
+      this.logger.log(`- Emissor: ${extractedData.issuer || 'não detectado'}`);
+
+      // Atualizar os campos da fatura
       invoice.amount = extractedData.amount || 0;
-      invoice.dueDate = extractedData.dueDate;
-      invoice.issueDate = extractedData.issueDate;
-      invoice.issuer = extractedData.issuer;
+      invoice.dueDate = extractedData.dueDate || new Date();
+      invoice.issueDate = extractedData.issueDate || new Date();
+      invoice.issuer = extractedData.issuer || 'Não identificado';
 
       // Classificar a fatura
-      invoice.category = this.classificationService.classifyInvoice(
-        rawText,
-        invoice.issuer,
-      );
+      invoice.category =
+        this.classificationService.classifyInvoice(rawText, invoice.issuer) ||
+        'outros';
 
       // Atualizar status
       invoice.status = 'PROCESSADO';
 
       // Salvar fatura atualizada
-      return this.invoicesRepository.save(invoice);
+      const savedInvoice = await this.invoicesRepository.save(invoice);
+      this.logger.log(`Fatura ${savedInvoice.id} processada com sucesso`);
+
+      return savedInvoice;
     } catch (error) {
       this.logger.error(
         `Erro ao processar fatura: ${error.message}`,
@@ -77,6 +104,7 @@ export class InvoicesService {
       invoice.filename = file.originalname;
       invoice.filePath = filePath;
       invoice.status = 'ERRO';
+      invoice.amount = 0; // Garantir um valor padrão mesmo em caso de erro
       invoice.description = `Erro ao processar: ${error.message}`;
       return this.invoicesRepository.save(invoice);
     }
@@ -215,5 +243,90 @@ export class InvoicesService {
     }
 
     await this.invoicesRepository.delete(id);
+  }
+
+  /**
+   * Limpa todos os dados do banco (faturas e notificações)
+   */
+  async limparTodosDados(): Promise<{ success: boolean; message: string }> {
+    this.logger.log('Iniciando limpeza de todos os dados');
+
+    try {
+      // Usar uma transação para garantir que todas as operações são realizadas ou nenhuma é
+      const queryRunner =
+        this.invoicesRepository.manager.connection.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      try {
+        // Remover notificações com SQL direto para ignorar restrições de chave estrangeira
+        await queryRunner.query('TRUNCATE TABLE notification CASCADE');
+        this.logger.log('Notificações removidas com sucesso');
+
+        // Obter todas as faturas para remover os arquivos físicos
+        const todasFaturas = await this.invoicesRepository.find();
+
+        // Remover arquivos físicos
+        for (const fatura of todasFaturas) {
+          if (fatura.filePath && fs.existsSync(fatura.filePath)) {
+            try {
+              fs.unlinkSync(fatura.filePath);
+            } catch (error) {
+              this.logger.error(`Erro ao remover arquivo: ${fatura.filePath}`);
+            }
+
+            // Remover também arquivos de processamento associados
+            const dir = path.dirname(fatura.filePath);
+            const base = path.basename(fatura.filePath);
+
+            // Procurar por arquivos processados associados
+            const arquivosRelacionados = fs
+              .readdirSync(dir)
+              .filter((file) => file.startsWith(base) || file.includes(base));
+
+            for (const arquivo of arquivosRelacionados) {
+              try {
+                const caminhoCompleto = path.join(dir, arquivo);
+                if (
+                  caminhoCompleto !== fatura.filePath &&
+                  fs.existsSync(caminhoCompleto)
+                ) {
+                  fs.unlinkSync(caminhoCompleto);
+                }
+              } catch (error) {
+                this.logger.error(
+                  `Erro ao remover arquivo relacionado: ${arquivo}`,
+                );
+              }
+            }
+          }
+        }
+
+        // Limpar a tabela de faturas usando SQL direto
+        await queryRunner.query('TRUNCATE TABLE invoice CASCADE');
+        this.logger.log('Faturas removidas com sucesso');
+
+        // Confirmar a transação
+        await queryRunner.commitTransaction();
+
+        return {
+          success: true,
+          message: 'Todos os dados foram excluídos com sucesso!',
+        };
+      } catch (error) {
+        // Se ocorrer um erro, desfazer a transação
+        await queryRunner.rollbackTransaction();
+        throw error;
+      } finally {
+        // Libera o queryRunner
+        await queryRunner.release();
+      }
+    } catch (error) {
+      this.logger.error(`Erro ao limpar dados: ${error.message}`, error.stack);
+      return {
+        success: false,
+        message: `Erro ao limpar dados: ${error.message}`,
+      };
+    }
   }
 }

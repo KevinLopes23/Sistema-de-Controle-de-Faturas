@@ -14,7 +14,7 @@ import { invoicesApi } from "../services/api";
 import { Invoice } from "../types/invoice";
 
 // Modo de demonstração para testes sem backend
-const DEMO_MODE = true;
+const DEMO_MODE = false;
 
 // Dados de exemplo para o modo de demonstração
 const DEMO_INVOICES: Invoice[] = [

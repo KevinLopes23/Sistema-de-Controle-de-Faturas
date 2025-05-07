@@ -9,6 +9,8 @@ import {
   Backdrop,
   Snackbar,
 } from "@mui/material";
+import AlertTitle from "@mui/material/AlertTitle";
+import Stack from "@mui/material/Stack";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import { invoicesApi } from "../services/api";
 
@@ -20,7 +22,9 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onSuccess }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState("");
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files.length > 0) {
@@ -29,6 +33,7 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onSuccess }) => {
       if (file.type === "application/pdf" || file.type.startsWith("image/")) {
         setSelectedFile(file);
         setError(null);
+        setWarning(null); // Reset warning ao selecionar novo arquivo
       } else {
         setError(
           "Por favor, selecione apenas arquivos PDF ou imagens (PNG, JPG, etc)"
@@ -46,27 +51,102 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onSuccess }) => {
 
     setIsUploading(true);
     setError(null);
+    setWarning(null);
+    setOcrStatus("Enviando arquivo...");
 
     try {
-      await invoicesApi.upload(selectedFile);
-      setSuccess(true);
-      setSelectedFile(null);
+      // Verificar se é um arquivo PDF para personalizar as mensagens
+      const isPdf = selectedFile.type === "application/pdf";
 
-      // Limpar input de arquivo
-      const fileInput = document.getElementById(
-        "invoice-upload"
-      ) as HTMLInputElement;
-      if (fileInput) {
-        fileInput.value = "";
-      }
+      // Adicionar um timeout para feedback mais detalhado sobre progresso do OCR
+      const showProgress = () => {
+        const baseProgressMessages = [
+          "Enviando arquivo...",
+          "Analisando documento...",
+          "Reconhecendo texto...",
+          "Extraindo dados importantes...",
+          "Classificando fatura...",
+        ];
 
-      // Chamar callback de sucesso se fornecido
-      if (onSuccess) {
-        onSuccess();
+        // Mensagens específicas para PDF
+        const pdfProgressMessages = [
+          "Enviando arquivo...",
+          "Convertendo PDF para imagem...",
+          "Pré-processando imagem...",
+          "Analisando documento com OCR...",
+          "Reconhecendo texto...",
+          "Extraindo dados importantes...",
+          "Classificando fatura...",
+        ];
+
+        const progressMessages = isPdf
+          ? pdfProgressMessages
+          : baseProgressMessages;
+
+        let i = 0;
+        const interval = setInterval(
+          () => {
+            if (i < progressMessages.length) {
+              setOcrStatus(progressMessages[i]);
+              i++;
+            } else {
+              clearInterval(interval);
+            }
+          },
+          isPdf ? 2500 : 2000
+        ); // PDF leva mais tempo, então damos mais tempo entre mensagens
+
+        return interval;
+      };
+
+      const progressInterval = showProgress();
+
+      // Fazer o upload da fatura
+      const response = await invoicesApi.upload(selectedFile);
+
+      clearInterval(progressInterval);
+
+      // Verificar se houve sucesso
+      if (response.success) {
+        // Verificar se há avisos sobre dados não detectados
+        if (response.warnings) {
+          setWarning(response.warnings);
+
+          // Para PDFs, adicionar uma dica extra se houve problemas
+          if (response.isPdf && !response.invoice?.amount) {
+            setWarning(
+              (prev) =>
+                `${
+                  prev || ""
+                }\n\nDica: Para melhor reconhecimento de PDFs, você pode converter manualmente para JPG antes de enviar.`
+            );
+          }
+        }
+
+        setSuccess(true);
+        setSelectedFile(null);
+
+        // Limpar input de arquivo
+        const fileInput = document.getElementById(
+          "invoice-upload"
+        ) as HTMLInputElement;
+        if (fileInput) {
+          fileInput.value = "";
+        }
+
+        // Chamar callback de sucesso se fornecido
+        if (onSuccess) {
+          onSuccess();
+        }
+      } else {
+        setError(response.message || "Erro desconhecido ao processar a fatura");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro ao fazer upload da fatura:", err);
-      setError("Falha ao fazer upload da fatura. Por favor, tente novamente.");
+      setError(
+        err.response?.data?.message ||
+          "Falha ao fazer upload da fatura. Por favor, tente novamente."
+      );
     } finally {
       setIsUploading(false);
     }
@@ -74,6 +154,10 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onSuccess }) => {
 
   const handleCloseSnackbar = () => {
     setSuccess(false);
+  };
+
+  const handleCloseWarning = () => {
+    setWarning(null);
   };
 
   return (
@@ -127,11 +211,25 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onSuccess }) => {
           </Typography>
         )}
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
+        <Stack spacing={2} sx={{ width: "100%", mb: 2 }}>
+          {error && (
+            <Alert severity="error" onClose={() => setError(null)}>
+              <AlertTitle>Erro</AlertTitle>
+              {error}
+            </Alert>
+          )}
+
+          {warning && (
+            <Alert severity="warning" onClose={handleCloseWarning}>
+              <AlertTitle>Atenção</AlertTitle>
+              {warning}
+              <Typography variant="caption" display="block" mt={1}>
+                Você pode corrigir manualmente esses dados na tela de detalhes
+                da fatura.
+              </Typography>
+            </Alert>
+          )}
+        </Stack>
 
         <Button
           variant="contained"
@@ -157,7 +255,7 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onSuccess }) => {
           }}
         >
           <CircularProgress color="inherit" />
-          <Typography sx={{ mt: 2 }}>Processando fatura com OCR...</Typography>
+          <Typography sx={{ mt: 2 }}>{ocrStatus}</Typography>
         </Box>
       </Backdrop>
 
@@ -166,8 +264,11 @@ const InvoiceUpload: React.FC<InvoiceUploadProps> = ({ onSuccess }) => {
         open={success}
         autoHideDuration={6000}
         onClose={handleCloseSnackbar}
-        message="Fatura enviada com sucesso!"
-      />
+      >
+        <Alert onClose={handleCloseSnackbar} severity="success">
+          Fatura enviada com sucesso!
+        </Alert>
+      </Snackbar>
     </Paper>
   );
 };

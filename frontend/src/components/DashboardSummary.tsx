@@ -33,11 +33,11 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ invoices }) => {
 
   // Calcular estatísticas
   const totalPaid = paidInvoices.reduce(
-    (sum, invoice) => sum + invoice.amount,
+    (sum, invoice) => sum + (Number(invoice.amount) || 0),
     0
   );
   const totalPending = pendingInvoices.reduce(
-    (sum, invoice) => sum + invoice.amount,
+    (sum, invoice) => sum + (Number(invoice.amount) || 0),
     0
   );
   const totalAmount = totalPaid + totalPending;
@@ -97,7 +97,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ invoices }) => {
                   Total Pago
                 </Typography>
                 <Typography variant="h4" sx={{ mb: 1, fontWeight: 700 }}>
-                  R$ {totalPaid.toFixed(2).replace(".", ",")}
+                  R$ {(totalPaid || 0).toFixed(2).replace(".", ",")}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {paidInvoices.length} faturas
@@ -156,7 +156,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ invoices }) => {
                   Total Pendente
                 </Typography>
                 <Typography variant="h4" sx={{ mb: 1, fontWeight: 700 }}>
-                  R$ {totalPending.toFixed(2).replace(".", ",")}
+                  R$ {(totalPending || 0).toFixed(2).replace(".", ",")}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {pendingInvoices.length} faturas
@@ -343,7 +343,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ invoices }) => {
                 color="primary.light"
                 sx={{ minWidth: "60px", textAlign: "right" }}
               >
-                {paidPercentage.toFixed(1)}%
+                {(paidPercentage || 0).toFixed(1)}%
               </Typography>
             </Box>
 
@@ -363,7 +363,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ invoices }) => {
                   Pendente
                 </Typography>
                 <Typography variant="h6">
-                  R$ {totalPending.toFixed(2).replace(".", ",")}
+                  R$ {(totalPending || 0).toFixed(2).replace(".", ",")}
                 </Typography>
               </Box>
               <Divider
@@ -376,7 +376,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ invoices }) => {
                   Total
                 </Typography>
                 <Typography variant="h6">
-                  R$ {totalAmount.toFixed(2).replace(".", ",")}
+                  R$ {(totalAmount || 0).toFixed(2).replace(".", ",")}
                 </Typography>
               </Box>
             </Box>
@@ -470,7 +470,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ invoices }) => {
                         variant="body2"
                         sx={{ fontWeight: 600, color: "info.main" }}
                       >
-                        R$ {invoice.amount.toFixed(2).replace(".", ",")}
+                        R$ {Number(invoice.amount).toFixed(2).replace(".", ",")}
                       </Typography>
                     </Box>
                   </Box>
@@ -581,7 +581,7 @@ const DashboardSummary: React.FC<DashboardSummaryProps> = ({ invoices }) => {
                         variant="body2"
                         sx={{ fontWeight: 600, color: "error.main" }}
                       >
-                        R$ {invoice.amount.toFixed(2).replace(".", ",")}
+                        R$ {Number(invoice.amount).toFixed(2).replace(".", ",")}
                       </Typography>
                     </Box>
                   </Box>

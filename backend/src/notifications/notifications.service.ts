@@ -1,193 +1,79 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, Equal } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { Notification } from '../entities/notification.entity';
 import { Invoice } from '../entities/invoice.entity';
-import * as nodemailer from 'nodemailer';
-import { ConfigService } from '@nestjs/config';
-import { InvoicesService } from '../invoices/invoices.service';
-import * as AgendaJS from 'agenda';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class NotificationsService {
-  private readonly logger = new Logger(NotificationsService.name);
-  private transporter: nodemailer.Transporter;
-  private agenda: any; // Usando any temporariamente para contornar o problema de tipagem
-
   constructor(
     @InjectRepository(Notification)
     private notificationsRepository: Repository<Notification>,
     @InjectRepository(Invoice)
     private invoicesRepository: Repository<Invoice>,
-    private configService: ConfigService,
-    private invoicesService: InvoicesService,
-  ) {
-    // Configuração do nodemailer
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get('EMAIL_HOST'),
-      port: this.configService.get('EMAIL_PORT'),
-      secure: this.configService.get('EMAIL_SECURE') === 'true',
-      auth: {
-        user: this.configService.get('EMAIL_USER'),
-        pass: this.configService.get('EMAIL_PASS'),
+  ) {}
+
+  async findAll(): Promise<Notification[]> {
+    return this.notificationsRepository.find({
+      relations: ['invoice'],
+      order: { scheduleDate: 'DESC' },
+    });
+  }
+
+  async findPending(): Promise<Notification[]> {
+    return this.notificationsRepository.find({
+      where: {
+        sent: false,
+        scheduleDate: LessThan(new Date()),
       },
+      relations: ['invoice'],
     });
-
-    // Configuração do Agenda
-    this.agenda = new AgendaJS.Agenda({
-      db: {
-        address:
-          this.configService.get('MONGODB_URI') ||
-          'mongodb://localhost/invoice-system',
-      },
-    });
-
-    this.setupAgenda();
   }
 
-  private async setupAgenda() {
-    // Aguardar a conexão do agenda
-    await this.agenda.start();
-
-    // Definir job para processamento de notificações
-    this.agenda.define('check-pending-notifications', async (job) => {
-      try {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        // Buscar notificações programadas para hoje que ainda não foram enviadas
-        const notifications = await this.notificationsRepository.find({
-          where: {
-            scheduleDate: Equal(today),
-            sent: false,
-          },
-          relations: ['invoice'],
-        });
-
-        this.logger.log(
-          `Processando ${notifications.length} notificações pendentes`,
-        );
-
-        // Processar cada notificação
-        for (const notification of notifications) {
-          await this.sendNotification(notification);
-        }
-      } catch (error) {
-        this.logger.error('Erro ao processar notificações', error.stack);
-      }
-    });
-
-    // Programar verificação diária de notificações (às 8 da manhã)
-    this.agenda.every('0 8 * * *', 'check-pending-notifications');
-
-    // Definir job para criar notificações de vencimento
-    this.agenda.define('create-due-date-notifications', async () => {
-      try {
-        // Buscar faturas com vencimento em 2 dias
-        const twoDaysFromNow = new Date();
-        twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2);
-        twoDaysFromNow.setHours(0, 0, 0, 0);
-
-        const invoices = await this.invoicesRepository.find({
-          where: {
-            dueDate: Equal(twoDaysFromNow),
-            paid: false,
-          },
-        });
-
-        this.logger.log(
-          `Criando notificações para ${invoices.length} faturas com vencimento próximo`,
-        );
-
-        // Criar notificações para cada fatura
-        for (const invoice of invoices) {
-          await this.createDueDateNotification(invoice);
-        }
-      } catch (error) {
-        this.logger.error(
-          'Erro ao criar notificações de vencimento',
-          error.stack,
-        );
-      }
-    });
-
-    // Executar diariamente às 7 da manhã
-    this.agenda.every('0 7 * * *', 'create-due-date-notifications');
-  }
-
-  /**
-   * Cria uma notificação de vencimento para uma fatura
-   */
-  async createDueDateNotification(invoice: Invoice): Promise<Notification> {
-    const notification = new Notification();
-    notification.invoiceId = invoice.id;
-    notification.type = 'VENCIMENTO';
-    notification.scheduleDate = new Date();
-    notification.emailTo = this.configService.get('DEFAULT_NOTIFICATION_EMAIL');
-    notification.sent = false;
-    notification.message = `A fatura ${invoice.issuer || 'sem emissor'} no valor de R$ ${invoice.amount} vence em 2 dias (${invoice.dueDate.toLocaleDateString('pt-BR')}).`;
-
-    return this.notificationsRepository.save(notification);
-  }
-
-  /**
-   * Cria uma notificação para uma fatura que excedeu um valor limite
-   */
-  async createExceedLimitNotification(
+  async createNotification(
     invoice: Invoice,
-    limit: number,
+    type: string,
+    scheduleDate: Date,
   ): Promise<Notification> {
-    const notification = new Notification();
-    notification.invoiceId = invoice.id;
-    notification.type = 'LIMITE_EXCEDIDO';
-    notification.scheduleDate = new Date();
-    notification.emailTo = this.configService.get('DEFAULT_NOTIFICATION_EMAIL');
-    notification.sent = false;
-    notification.message = `Alerta: A fatura ${invoice.issuer || 'sem emissor'} possui valor de R$ ${invoice.amount}, que excede o limite de R$ ${limit} para a categoria ${invoice.category}.`;
-
+    const notification = this.notificationsRepository.create({
+      invoiceId: invoice.id,
+      type,
+      scheduleDate,
+      message: this.generateMessage(invoice, type),
+    });
     return this.notificationsRepository.save(notification);
   }
 
-  /**
-   * Envia uma notificação
-   */
-  async sendNotification(notification: Notification): Promise<void> {
-    try {
-      if (!notification.emailTo) {
-        throw new Error('Email de destino não definido');
-      }
+  async sendNotification(id: number): Promise<{ success: boolean }> {
+    const notification = await this.notificationsRepository.findOne({
+      where: { id },
+      relations: ['invoice'],
+    });
 
-      // Enviar e-mail
-      await this.transporter.sendMail({
-        from: this.configService.get('EMAIL_FROM') || 'sistema@faturas.com',
-        to: notification.emailTo,
-        subject: `Notificação: ${notification.type === 'VENCIMENTO' ? 'Fatura com vencimento próximo' : 'Alerta de valor excedido'}`,
-        text: notification.message,
-        html: `<div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-          <h2 style="color: #2c3e50;">${notification.type === 'VENCIMENTO' ? 'Aviso de Vencimento' : 'Alerta de Valor Excedido'}</h2>
-          <p>${notification.message}</p>
-          <p>Acesse o sistema para mais detalhes.</p>
-        </div>`,
-      });
+    if (!notification || notification.sent) {
+      return { success: false };
+    }
 
-      // Marcar como enviada
-      notification.sent = true;
-      await this.notificationsRepository.save(notification);
+    // Aqui você pode implementar o envio real de email
+    console.log(`Enviando notificação: ${notification.message}`);
 
-      this.logger.log(`Notificação ${notification.id} enviada com sucesso`);
-    } catch (error) {
-      this.logger.error(
-        `Erro ao enviar notificação ${notification.id}: ${error.message}`,
-        error.stack,
-      );
-      throw error;
+    notification.sent = true;
+    notification.processedAt = new Date();
+    await this.notificationsRepository.save(notification);
+
+    return { success: true };
+  }
+
+  @Cron('0 * * * *') // Executa a cada hora
+  async processPendingNotifications() {
+    const pendingNotifications = await this.findPending();
+
+    for (const notification of pendingNotifications) {
+      await this.sendNotification(notification.id);
     }
   }
 
-  /**
-   * Verifica limites de valor para criar notificações
-   * Chamado após o processamento OCR de uma nova fatura
-   */
   async checkValueLimits(invoice: Invoice): Promise<void> {
     const limitsMap = {
       energia: 300,
@@ -209,37 +95,18 @@ export class NotificationsService {
     const limit = limitsMap[category] || limitsMap['outros'];
 
     if (invoice.amount > limit) {
-      await this.createExceedLimitNotification(invoice, limit);
-      this.logger.log(
-        `Criada notificação de limite excedido para fatura ${invoice.id}`,
-      );
+      await this.createNotification(invoice, 'LIMITE_EXCEDIDO', new Date());
     }
   }
 
-  /**
-   * Busca todas as notificações
-   */
-  async findAll(): Promise<Notification[]> {
-    return this.notificationsRepository.find({
-      relations: ['invoice'],
-      order: {
-        scheduleDate: 'DESC',
-      },
-    });
-  }
-
-  /**
-   * Busca notificações pendentes
-   */
-  async findPending(): Promise<Notification[]> {
-    return this.notificationsRepository.find({
-      where: {
-        sent: false,
-      },
-      relations: ['invoice'],
-      order: {
-        scheduleDate: 'ASC',
-      },
-    });
+  private generateMessage(invoice: Invoice, type: string): string {
+    switch (type) {
+      case 'VENCIMENTO':
+        return `Fatura ${invoice.filename} vence em ${invoice.dueDate}`;
+      case 'LIMITE_EXCEDIDO':
+        return `Fatura ${invoice.filename} excede o limite estabelecido`;
+      default:
+        return `Notificação para fatura ${invoice.filename}`;
+    }
   }
 }

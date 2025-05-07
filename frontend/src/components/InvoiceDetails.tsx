@@ -39,7 +39,7 @@ const InvoiceDetails: React.FC<InvoiceDetailsProps> = ({
 
   // Formatar valor
   const formatCurrency = (value: number) => {
-    return `R$ ${value.toFixed(2).replace(".", ",")}`;
+    return `R$ ${Number(value).toFixed(2).replace(".", ",")}`;
   };
 
   return (

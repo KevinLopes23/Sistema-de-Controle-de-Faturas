@@ -175,7 +175,7 @@ const InvoicesList: React.FC<InvoicesListProps> = ({
                       )}
                     </TableCell>
                     <TableCell align="right">
-                      R$ {invoice.amount.toFixed(2).replace(".", ",")}
+                      R$ {Number(invoice.amount).toFixed(2).replace(".", ",")}
                     </TableCell>
                     <TableCell>
                       {invoice.dueDate

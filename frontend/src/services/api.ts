@@ -34,7 +34,15 @@ export const invoicesApi = {
   },
 
   // Fazer upload de uma nova fatura
-  upload: async (file: File): Promise<Invoice> => {
+  upload: async (
+    file: File
+  ): Promise<{
+    success: boolean;
+    invoice?: Invoice;
+    warnings?: string;
+    message?: string;
+    isPdf?: boolean;
+  }> => {
     const formData = new FormData();
     formData.append("file", file);
 

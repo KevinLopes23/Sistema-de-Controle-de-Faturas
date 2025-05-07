@@ -17,7 +17,7 @@ export class Invoice {
   @Column({ nullable: true })
   issuer: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   amount: number;
 
   @Column({ type: 'date', nullable: true })

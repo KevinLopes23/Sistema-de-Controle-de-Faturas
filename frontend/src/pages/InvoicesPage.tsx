@@ -25,7 +25,7 @@ import { invoicesApi } from "../services/api";
 import { Invoice, CategoryLabels } from "../types/invoice";
 
 // Modo de demonstração para testes sem backend
-const DEMO_MODE = true;
+const DEMO_MODE = false;
 
 // Mesmos dados de exemplo da página Dashboard
 const DEMO_INVOICES: Invoice[] = [
@@ -94,9 +94,13 @@ const InvoicesPage: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
+  // Efeito para buscar faturas quando o componente montar ou a tab mudar
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
+
   const fetchInvoices = async () => {
     setIsLoading(true);
     setError(null);
+    console.log("Iniciando fetchInvoices - tab:", tabValue);
 
     // Usar dados de demonstração se estiver no modo demo
     if (demoMode) {
@@ -125,6 +129,7 @@ const InvoicesPage: React.FC = () => {
         setInvoices(data);
         applyFilters(data);
         setIsLoading(false);
+        console.log("Atualizado em modo demo com", data.length, "faturas");
       }, 800); // Simular um pequeno atraso
       return;
     }
@@ -141,6 +146,7 @@ const InvoicesPage: React.FC = () => {
         data = await invoicesApi.getOverdue();
       }
 
+      console.log("Dados recebidos da API:", data.length, "faturas");
       setInvoices(data);
       applyFilters(data);
     } catch (err) {
@@ -192,26 +198,46 @@ const InvoicesPage: React.FC = () => {
   // Excluir fatura
   const handleDeleteInvoice = async (id: number) => {
     try {
+      setIsLoading(true);
       await invoicesApi.delete(id);
       setSuccessMessage("Fatura excluída com sucesso");
-      fetchInvoices();
+
+      // Atualizar a lista localmente para resposta imediata da UI
+      const updatedInvoices = invoices.filter((invoice) => invoice.id !== id);
+      setInvoices(updatedInvoices);
+      applyFilters(updatedInvoices);
+
+      // Forçar atualização completa
+      setRefreshTrigger((prev) => prev + 1);
     } catch (err) {
       console.error("Erro ao excluir fatura:", err);
       setError("Falha ao excluir a fatura. Por favor, tente novamente.");
+      setIsLoading(false);
     }
   };
 
   // Marcar fatura como paga
   const handleMarkAsPaid = async (id: number) => {
     try {
-      await invoicesApi.markAsPaid(id);
+      setIsLoading(true);
+      const updatedInvoice = await invoicesApi.markAsPaid(id);
       setSuccessMessage("Fatura marcada como paga");
-      fetchInvoices();
+
+      // Atualizar a lista localmente para resposta imediata da UI
+      const updatedInvoices = invoices.map((invoice) =>
+        invoice.id === id ? { ...invoice, paid: true } : invoice
+      );
+      setInvoices(updatedInvoices);
+      applyFilters(updatedInvoices);
+
+      // Forçar atualização completa
+      setRefreshTrigger((prev) => prev + 1);
     } catch (err) {
       console.error("Erro ao marcar fatura como paga:", err);
       setError(
         "Falha ao marcar a fatura como paga. Por favor, tente novamente."
       );
+      setIsLoading(false);
     }
   };
 
@@ -234,12 +260,17 @@ const InvoicesPage: React.FC = () => {
   // Efeito para buscar faturas quando o componente montar ou a tab mudar
   useEffect(() => {
     fetchInvoices();
-  }, [tabValue]);
+  }, [tabValue, refreshTrigger]);
 
   // Efeito para aplicar filtros quando eles mudarem
   useEffect(() => {
     applyFilters(invoices);
   }, [categoryFilter, statusFilter]);
+
+  // Atualizar manualmente
+  const handleRefresh = () => {
+    setRefreshTrigger((prev) => prev + 1);
+  };
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -313,7 +344,7 @@ const InvoicesPage: React.FC = () => {
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}
-              onClick={fetchInvoices}
+              onClick={handleRefresh}
             >
               Atualizar
             </Button>
@@ -328,7 +359,7 @@ const InvoicesPage: React.FC = () => {
         onDelete={handleDeleteInvoice}
         onMarkAsPaid={handleMarkAsPaid}
         onViewDetails={handleViewDetails}
-        onRefresh={fetchInvoices}
+        onRefresh={handleRefresh}
       />
 
       {/* Modal de Detalhes */}

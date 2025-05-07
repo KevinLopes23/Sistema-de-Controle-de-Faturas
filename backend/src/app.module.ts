@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MulterModule } from '@nestjs/platform-express';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -18,74 +19,19 @@ import { OcrService } from './ocr/ocr.service';
 import { ClassificationService } from './classification/classification.service';
 
 import databaseConfig from './config/database.config';
-
-// Mock para o repositório
-class MockInvoiceRepository {
-  private invoices: Invoice[] = [];
-  private idCounter = 1;
-
-  async save(invoice: Invoice): Promise<Invoice> {
-    if (!invoice.id) {
-      invoice.id = this.idCounter++;
-      invoice.createdAt = new Date();
-      this.invoices.push(invoice);
-    } else {
-      const index = this.invoices.findIndex((i) => i.id === invoice.id);
-      if (index !== -1) {
-        this.invoices[index] = {
-          ...this.invoices[index],
-          ...invoice,
-          updatedAt: new Date(),
-        };
-      }
-    }
-    return { ...invoice };
-  }
-
-  async findOne(options: any): Promise<Invoice | undefined> {
-    const id = options.where?.id;
-    return this.invoices.find((invoice) => invoice.id === id);
-  }
-
-  async find(options?: any): Promise<Invoice[]> {
-    // Implementação básica sem filtros
-    return [...this.invoices];
-  }
-
-  async delete(id: number): Promise<void> {
-    const index = this.invoices.findIndex((invoice) => invoice.id === id);
-    if (index !== -1) {
-      this.invoices.splice(index, 1);
-    }
-  }
-
-  createQueryBuilder() {
-    return {
-      andWhere: () => this,
-      orderBy: () => this,
-      getMany: () => this.invoices,
-    };
-  }
-
-  update(id: number, data: Partial<Invoice>): Promise<any> {
-    const invoice = this.invoices.find((i) => i.id === id);
-    if (invoice) {
-      Object.assign(invoice, data, { updatedAt: new Date() });
-    }
-    return Promise.resolve({ affected: invoice ? 1 : 0 });
-  }
-}
+import aiConfig from './config/ai.config';
 
 @Module({
   imports: [
     // Configuração
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig],
+      load: [databaseConfig, aiConfig],
     }),
 
-    // Comentando temporariamente a configuração do banco de dados para teste
-    /*
+    // Agendamento de tarefas
+    ScheduleModule.forRoot(),
+
     // Banco de dados
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -97,7 +43,6 @@ class MockInvoiceRepository {
 
     // Entidades para injeção
     TypeOrmModule.forFeature([Invoice, Notification]),
-    */
 
     // Upload de arquivos
     MulterModule.register({
@@ -116,21 +61,6 @@ class MockInvoiceRepository {
     OcrService,
     ClassificationService,
     NotificationsService,
-    // Fornecer mock do repositório quando o banco de dados está desativado
-    {
-      provide: 'InvoiceRepository',
-      useClass: MockInvoiceRepository,
-    },
-    // Mock simples para NotificationRepository
-    {
-      provide: 'NotificationRepository',
-      useValue: {
-        find: () => [],
-        save: (entity) => entity,
-        findOne: () => null,
-        delete: () => Promise.resolve(),
-      },
-    },
   ],
 })
 export class AppModule {}
